@@ -1,0 +1,102 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# 编译后的可执行文件（仅根目录）
+/serve
+/serve.exe
+*.bin
+
+# IDE 相关文件
+# VSCode
+.vscode/
+*.code-workspace
+
+# GoLand / IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim
+*.swp
+*.swo
+*~
+.vim/
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# 日志文件
+*.log
+logs/
+
+# 临时文件
+*.tmp
+*.temp
+tmp/
+temp/
+
+# 证书和密钥文件（敏感信息）
+*.pem
+*.key
+*.crt
+*.cert
+*.p12
+*.pfx
+*.jks
+
+# 配置文件（如果包含敏感信息）
+config.local.*
+.env
+.env.local
+*.local
+
+# 测试覆盖率报告
+coverage.html
+coverage.xml
+coverage.txt
+
+# 静态文件目录（如果包含用户上传的文件）
+static/uploads/
+static/temp/
+
+# 其他
+*.bak
+*.backup
+*.orig
+
