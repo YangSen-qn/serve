@@ -19,22 +19,39 @@
 
 ### 反向代理服务
 
-代理服务采用路径前缀匹配的方式，将请求路径的第一段作为目标域名，后续路径段依次拼接。
+代理服务采用路径前缀匹配的方式：
+- 请求路径的第一段作为路径前缀，用于匹配代理配置
+- 如果找到匹配的配置：
+  - 如果配置中指定了目标域名，使用配置的目标域名
+  - 如果配置中未指定目标域名，使用路径第一段作为目标域名
+- 如果未找到匹配的配置，则不会进行代理转发
 
 #### 工作原理
 
-1. 请求路径格式：`/{目标域名}/{路径段1}/{路径段2}/...?{查询参数}`
-2. 目标域名作为路径的第一段（path item）
-3. 后续路径段按顺序拼接
-4. 请求方法（Method）、请求头、请求体、响应头、响应体等保持不变
-5. 请求协议（scheme）根据配置进行转换
+1. **请求路径格式**：`/{路径前缀}/{路径段1}/{路径段2}/...?{查询参数}`
+2. **域名确定规则**：
+   - 解析请求路径的第一段作为路径前缀
+   - 查找是否存在匹配该前缀的代理配置
+   - 如果找到配置：
+     - 如果配置中指定了 `target_domain`，使用配置的目标域名
+     - 如果配置中未指定 `target_domain`（为空），使用路径第一段作为目标域名
+3. **路径处理**：
+   - 如果配置中指定了 `target_domain`，保留路径前缀，完整路径转发
+   - 如果配置中未指定 `target_domain`（为空），移除路径第一段（路径前缀），后续路径段按顺序拼接（第一段做了域名）
+   - 保留查询参数
+4. **请求方法（Method）、请求头、请求体、响应头、响应体等保持不变**
+5. **请求协议（scheme）根据配置进行转换**
 
 #### 配置项说明
 
-- `use_https`：是否使用 HTTPS 协议进行代理请求
-  - `false`：使用 HTTP 协议
-  - `true`：使用 HTTPS 协议
-- `insecure`：在使用 HTTPS 时是否跳过 SSL 证书验证（仅在 `use_https` 为 `true` 时生效）
+代理配置格式：`path_prefix:target_domain:use_https:insecure`
+
+- `path_prefix`：路径前缀，用于匹配请求路径第一段
+- `target_domain`：目标域名
+  - 如果指定了目标域名，则使用该域名进行代理转发
+  - 如果为空（两个连续冒号之间为空），则使用 `path_prefix` 作为目标域名
+- `use_https`：是否使用 HTTPS 协议（`true` 或 `false`）
+- `insecure`：是否跳过 SSL 证书验证（`true` 或 `false`，仅在 `use_https` 为 `true` 时生效）
 
 #### 示例
 
@@ -54,11 +71,21 @@ https://192.168.5.2:8080/www.qi.com/a/b/c?x=y
 
 **处理流程：**
 
-1. 服务接收请求：`https://192.168.5.2:8080/www.qi.com/a/b/c?x=y`
-2. 解析路径第一段：`www.qi.com`
-3. 检查是否命中代理配置
-4. 如果命中，根据配置项进行协议转换和请求转发
-5. 将后续路径段 `/a/b/c` 和查询参数 `?x=y` 拼接至目标 URL
+**场景一：使用配置中指定的目标域名**
+1. 配置：`api:api.example.com:true:false`
+2. 服务接收请求：`https://192.168.5.2:8080/api/a/b/c?x=y`
+3. 解析路径第一段：`api`
+4. 检查是否存在路径前缀 `api` 的代理配置
+5. 如果存在配置，使用配置的目标域名 `api.example.com`
+6. 保留路径前缀（因为配置了目标域名），将完整路径 `/api/a/b/c` 和查询参数 `?x=y` 拼接至目标 URL：`https://api.example.com/api/a/b/c?x=y`
+
+**场景二：使用路径第一段作为目标域名**
+1. 配置：`api.com::true:false`（target_domain 为空）
+2. 服务接收请求：`https://192.168.5.2:8080/api.com/a/b/c?x=y`
+3. 解析路径第一段：`api.com`
+4. 检查是否存在路径前缀 `api.com` 的代理配置
+5. 如果存在配置，由于 target_domain 为空，使用路径第一段 `api.com` 作为目标域名
+6. 移除路径前缀，将后续路径段 `/a/b/c` 和查询参数 `?x=y` 拼接至目标 URL：`https://api.com/a/b/c?x=y`
 
 ## 安装
 
@@ -85,10 +112,10 @@ go install ./cmd/serve@latest
 项目提供了构建脚本来生成所有平台的二进制文件：
 
 ```bash
-# 构建所有平台的二进制文件
+# 构建所有平台的二进制文件（版本号会自动注入到二进制文件中）
 ./scripts/build-release.sh v1.0.0
 
-# 构建文件将输出到 dist/ 目录
+# 构建文件将输出到 .build/ 目录
 # 每个压缩包都包含二进制文件和 README.md
 ```
 
@@ -97,7 +124,10 @@ go install ./cmd/serve@latest
 - macOS (amd64, arm64)
 - Windows (amd64, arm64)
 
-**注意：** 每个平台的压缩包中都包含了 `README.md` 文件，方便用户查看使用说明。
+**注意：**
+- 每个平台的压缩包中都包含了 `README.md` 文件，方便用户查看使用说明
+- 构建时指定的版本号会通过 `-ldflags` 注入到二进制文件中，可通过 `./serve -v` 查看
+- GitHub Actions 工作流会在创建 Release 时自动触发，从 Release 的 tag 中提取版本号并注入到所有平台的二进制文件中
 
 ## 使用方法
 
@@ -110,34 +140,73 @@ go install ./cmd/serve@latest
 # 启动 HTTPS 服务器
 ./serve --host :8443 --cert-file cert.pem --key-file key.pem --static-dir ./static
 
-# 配置代理
-./serve --host :8080 --static-dir ./static --proxy www.example.com:true:false
+# 配置代理（指定目标域名）
+./serve --host :8080 --static-dir ./static --proxy api:api.example.com:true:false
 
-# 配置多个代理
-./serve --host :8080 --static-dir ./static --proxy "www.example.com:true:false,api.example.com:false:false"
+# 配置代理（使用路径第一段作为目标域名，target_domain 为空）
+./serve --host :8080 --static-dir ./static --proxy api::true:false
+
+# 配置多个代理（使用多个 --proxy 参数）
+./serve --host :8080 --static-dir ./static --proxy api:api.example.com:true:false --proxy www:www.example.com:false:false
 ```
 
 ### 命令行参数
 
+- `-v, --version`: 显示版本信息并退出
 - `--host`: 监听地址（默认：`:8080`）
 - `--cert-file`: SSL 证书文件路径（启用 HTTPS）
 - `--key-file`: SSL 私钥文件路径（启用 HTTPS）
 - `--log-level`: 日志等级，可选值：debug, info, warn, error（默认：`info`）
 - `--static-dir`: 静态文件目录路径（默认：`./static`）
-- `--proxy`: 代理配置，格式：`domain:use_https:insecure`，多个配置用逗号分隔
+- `--proxy`: 代理配置，格式：`path_prefix:target_domain:use_https:insecure`
+  - `path_prefix`: 路径前缀，用于匹配请求路径第一段
+  - `target_domain`: 目标域名，如果为空则使用 `path_prefix` 作为目标域名
+  - `use_https`: 是否使用 HTTPS，`true` 或 `false`
+  - `insecure`: 是否跳过 SSL 验证，`true` 或 `false`（仅在 `use_https` 为 `true` 时生效）
+  - 可以多次使用 `--proxy` 参数来配置多个代理
+
+### 查看版本
+
+```bash
+# 显示版本信息
+./serve -v
+# 或
+./serve --version
+```
 
 ### 代理配置格式
 
-代理配置格式：`domain:use_https:insecure`
+代理配置格式：`path_prefix:target_domain:use_https:insecure`
 
-- `domain`: 目标域名（如：`www.example.com`）
+- `path_prefix`: 路径前缀，用于匹配请求路径第一段（如：`api`）
+- `target_domain`: 目标域名（如：`api.example.com`）
+  - 如果指定了目标域名，则使用该域名进行代理转发
+  - 如果为空（两个连续冒号之间为空），则使用 `path_prefix` 作为目标域名
 - `use_https`: 是否使用 HTTPS，`true` 或 `false`
 - `insecure`: 是否跳过 SSL 验证，`true` 或 `false`（仅在 `use_https` 为 `true` 时生效）
 
+**工作流程：**
+1. 解析请求路径第一段作为路径前缀
+2. 检查是否存在匹配的代理配置（路径第一段等于配置的 `path_prefix`）
+3. 如果匹配成功：
+   - 如果配置中指定了 `target_domain`，使用配置的目标域名，并保留路径前缀（完整路径转发）
+   - 如果配置中未指定 `target_domain`（为空），使用路径第一段作为目标域名，并移除路径前缀
+   - 根据配置的协议（HTTP/HTTPS）进行转发
+4. 如果未匹配，则不会进行代理转发（可能由静态文件服务处理）
+
 示例：
-- `www.example.com:true:false` - 使用 HTTPS，验证证书
-- `api.example.com:true:true` - 使用 HTTPS，跳过证书验证
-- `test.example.com:false:false` - 使用 HTTP
+- `api:api.example.com:true:false` - 匹配路径 `/api/...`，代理到 `https://api.example.com/api/...`（保留路径前缀），验证证书
+- `api.com::true:false` - 匹配路径 `/api.com/...`，代理到 `https://api.com/...`（移除路径前缀），验证证书（target_domain 为空，使用路径第一段作为目标域名）
+- `abc:api.example.com:true:true` - 匹配路径 `/abc/...`，代理到 `https://api.example.com/abc/...`（保留路径前缀），跳过证书验证
+
+**配置多个代理：**
+```bash
+# 使用多个 --proxy 参数
+./serve --host :8080 --static-dir ./static \
+  --proxy api:api.example.com:true:false \
+  --proxy www:www.example.com:false:false \
+  --proxy test::true:true
+```
 
 ## 项目结构
 

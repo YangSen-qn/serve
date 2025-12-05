@@ -18,6 +18,9 @@ import (
 )
 
 var (
+	// 版本号，通过构建时注入：-ldflags "-X main.version=xxx"
+	version = "dev"
+
 	// 命令行参数
 	host      string
 	certFile  string
@@ -25,8 +28,8 @@ var (
 	logLevel  string
 	staticDir string
 
-	// 代理配置（格式：domain:use_https:insecure，多个用逗号分隔）
-	proxyConfigs string
+	// 代理配置（格式：path_prefix:target_domain:use_https:insecure，可以多次使用 --proxy）
+	proxyConfigs []string
 )
 
 // rootCmd 根命令
@@ -62,37 +65,48 @@ func init() {
 	rootCmd.Flags().StringVar(&keyFile, "ssl-key-file", "", "SSL 私钥文件路径（启用 HTTPS）")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "info", "日志等级（debug, info, warn, error）")
 	rootCmd.Flags().StringVar(&staticDir, "static-dir", "./static", "静态文件目录路径")
-	rootCmd.Flags().StringVar(&proxyConfigs, "proxy", "",
-		`反向代理配置，格式：domain:use_https:insecure，多个配置用逗号分隔
+
+	// 版本显示
+	rootCmd.Flags().BoolP("version", "v", false, "显示版本信息")
+
+	rootCmd.Flags().StringArrayVar(&proxyConfigs, "proxy", []string{},
+		`反向代理配置，格式：path_prefix:target_domain:use_https:insecure，可以多次使用 --proxy 参数
 		
 格式说明：
-  - domain: 目标域名（如 www.example.com），将作为请求路径的第一段进行匹配
+  - path_prefix: 路径前缀，用于匹配请求路径第一段
+  - target_domain: 目标域名，如果为空则使用 path_prefix 作为目标域名
   - use_https: 是否使用 HTTPS 协议，可选值：true（使用 HTTPS）或 false（使用 HTTP）
   - insecure: 是否跳过 SSL 证书验证，可选值：true（跳过验证）或 false（验证证书）
             仅在 use_https 为 true 时生效
 
-工作原理：
-  请求路径格式：/{domain}/{path}?{query}
-  例如：http://localhost:8080/www.example.com/api/users?id=1
-  会被代理到：http://www.example.com/api/users?id=1（use_https=false）
-  或：https://www.example.com/api/users?id=1（use_https=true）
+                               工作原理：
+                                 请求路径格式：/{path_prefix}/{path}?{query}
+                                 1. 解析请求路径第一段作为路径前缀
+                                 2. 检查是否存在匹配的代理配置（路径第一段等于配置的 path_prefix）
+                                 3. 如果匹配成功：
+                                    - 如果配置中指定了 target_domain，使用配置的目标域名，并保留路径前缀（完整路径转发）
+                                    - 如果配置中未指定 target_domain（为空），使用路径第一段作为目标域名，并移除路径前缀
+                                 4. 如果未匹配，则不会进行代理转发（可能由静态文件服务处理）
 
-使用示例：
-  --proxy www.example.com:true:false
-    代理到 https://www.example.com，验证 SSL 证书
-  
-  --proxy api.example.com:true:true
-    代理到 https://api.example.com，跳过 SSL 证书验证
-  
-  --proxy test.example.com:false:false
-    代理到 http://test.example.com
-  
-  --proxy "www.example.com:true:false,api.example.com:false:false"
-    配置多个代理，用逗号分隔`)
+                               使用示例：
+                                 --proxy api:api.example.com:true:false
+                                   匹配路径 /api/...，代理到 https://api.example.com/api/...（保留路径前缀），验证 SSL 证书
+                                 
+                                 --proxy api::true:false
+                                   匹配路径 /api/...，代理到 https://api/...（移除路径前缀），验证 SSL 证书（target_domain 为空，使用路径第一段作为目标域名）
+                                 
+                                 --proxy api:api.example.com:true:false --proxy www:www.example.com:false:false
+                                   配置多个代理，使用多个 --proxy 参数`)
 }
 
 // runServer 运行服务器
 func runServer(cmd *cobra.Command, args []string) {
+	// 检查是否显示版本
+	if showVersion, _ := cmd.Flags().GetBool("version"); showVersion {
+		fmt.Printf("serve version %s\n", version)
+		os.Exit(0)
+	}
+
 	// 初始化日志
 	logger := logrus.New()
 	logger.SetFormatter(&logrus.TextFormatter{
@@ -157,31 +171,35 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 }
 
-// parseProxyConfigs 解析代理配置字符串
-// 格式：domain:use_https:insecure，多个配置用逗号分隔
-// 示例：www.example.com:true:false,api.example.com:false:false
-func parseProxyConfigs(cfg *config.Config, proxyStr string) error {
-	if proxyStr == "" {
+// parseProxyConfigs 解析代理配置字符串数组
+// 格式：path_prefix:target_domain:use_https:insecure
+// 如果 target_domain 为空，则使用 path_prefix 作为目标域名
+// 可以多次使用 --proxy 参数来配置多个代理
+// 示例：
+//   - api:api.example.com:true:false（路径前缀 api，目标域名 api.example.com）
+//   - api::true:false（路径前缀 api，target_domain 为空，使用 api 作为目标域名）
+func parseProxyConfigs(cfg *config.Config, proxyConfigs []string) error {
+	if len(proxyConfigs) == 0 {
 		return nil
 	}
 
-	// 分割多个配置
-	configs := strings.Split(proxyStr, ",")
-	for _, configStr := range configs {
+	for _, configStr := range proxyConfigs {
 		configStr = strings.TrimSpace(configStr)
 		if configStr == "" {
 			continue
 		}
 
-		// 分割配置项
-		parts := strings.Split(configStr, ":")
-		if len(parts) != 3 {
-			return fmt.Errorf("invalid proxy config format: %s (expected: domain:use_https:insecure)", configStr)
+		// 分割配置项（使用 SplitN 限制分割次数为4，避免域名中的冒号影响）
+		parts := strings.SplitN(configStr, ":", 4)
+
+		if len(parts) != 4 {
+			return fmt.Errorf("invalid proxy config format: %s (expected: path_prefix:target_domain:use_https:insecure)", configStr)
 		}
 
-		domain := strings.TrimSpace(parts[0])
-		useHTTPSStr := strings.TrimSpace(parts[1])
-		insecureStr := strings.TrimSpace(parts[2])
+		pathPrefix := strings.TrimSpace(parts[0])
+		targetDomain := strings.TrimSpace(parts[1])
+		useHTTPSStr := strings.TrimSpace(parts[2])
+		insecureStr := strings.TrimSpace(parts[3])
 
 		// 解析 use_https
 		useHTTPS := false
@@ -200,7 +218,7 @@ func parseProxyConfigs(cfg *config.Config, proxyStr string) error {
 		}
 
 		// 添加代理配置
-		cfg.AddProxyConfig(domain, useHTTPS, insecure)
+		cfg.AddProxyConfig(pathPrefix, targetDomain, useHTTPS, insecure)
 	}
 
 	return nil

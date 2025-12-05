@@ -98,6 +98,15 @@ main() {
     echo -e "${GREEN}Starting build for version: ${VERSION}${NC}"
     echo ""
     
+    # 确保依赖已下载
+    echo -e "${YELLOW}Downloading dependencies...${NC}"
+    go mod download
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to download dependencies${NC}"
+        exit 1
+    fi
+    echo ""
+    
     # 遍历所有目标平台
     for target in "${TARGETS[@]}"; do
         IFS='/' read -r os arch <<< "${target}"

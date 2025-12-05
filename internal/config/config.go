@@ -28,8 +28,9 @@ type Config struct {
 
 // ProxyConfig 代理配置结构
 type ProxyConfig struct {
-	UseHTTPS bool `json:"use_https"` // 是否使用 HTTPS 协议
-	Insecure bool `json:"insecure"`  // 是否跳过 SSL 证书验证（仅在 use_https 为 true 时生效）
+	TargetDomain string `json:"target_domain"` // 目标域名，如果为空则使用路径第一段作为目标域名
+	UseHTTPS     bool   `json:"use_https"`     // 是否使用 HTTPS 协议
+	Insecure     bool   `json:"insecure"`      // 是否跳过 SSL 证书验证（仅在 use_https 为 true 时生效）
 }
 
 // LoadConfig 加载配置
@@ -114,15 +115,20 @@ func (c *Config) GetLogLevel() logrus.Level {
 }
 
 // AddProxyConfig 添加代理配置
-func (c *Config) AddProxyConfig(domain string, useHTTPS, insecure bool) {
-	c.ProxyConfigs[domain] = &ProxyConfig{
-		UseHTTPS: useHTTPS,
-		Insecure: insecure,
+// pathPrefix: 路径前缀（用于匹配请求路径第一段）
+// targetDomain: 目标域名，如果为空则使用路径第一段作为目标域名
+// useHTTPS: 是否使用 HTTPS 协议
+// insecure: 是否跳过 SSL 证书验证
+func (c *Config) AddProxyConfig(pathPrefix, targetDomain string, useHTTPS, insecure bool) {
+	c.ProxyConfigs[pathPrefix] = &ProxyConfig{
+		TargetDomain: targetDomain,
+		UseHTTPS:     useHTTPS,
+		Insecure:     insecure,
 	}
 }
 
-// GetProxyConfig 获取指定域名的代理配置
-func (c *Config) GetProxyConfig(domain string) (*ProxyConfig, bool) {
-	config, exists := c.ProxyConfigs[domain]
+// GetProxyConfig 获取指定路径前缀的代理配置
+func (c *Config) GetProxyConfig(pathPrefix string) (*ProxyConfig, bool) {
+	config, exists := c.ProxyConfigs[pathPrefix]
 	return config, exists
 }

@@ -1,34 +1,30 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'  # 当推送以 v 开头的 tag 时触发
+  release:
+    types:
+      - published  # 当创建新的 Release 时触发（GitHub 会自动创建 tag）
 
 jobs:
   build:
     name: Build Release
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # 需要读取权限来访问代码和 Release 信息
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            goos: linux
+          - goos: linux
             goarch: amd64
-          - os: ubuntu-latest
-            goos: linux
+          - goos: linux
             goarch: arm64
-          - os: macos-latest
-            goos: darwin
+          - goos: darwin
             goarch: amd64
-          - os: macos-latest
-            goos: darwin
+          - goos: darwin
             goarch: arm64
-          - os: windows-latest
-            goos: windows
+          - goos: windows
             goarch: amd64
-          - os: windows-latest
-            goos: windows
+          - goos: windows
             goarch: arm64
 
     steps:
@@ -40,15 +36,27 @@ jobs:
         with:
           go-version: '1.21'
 
-      - name: Get version from tag
-        id: get_version
+      - name: Download dependencies
+        shell: bash
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          VERSION=${VERSION#v}
+          go mod tidy
+          go mod download
+          go mod verify
+
+      - name: Get version from release
+        id: get_version
+        shell: bash
+        run: |
+          # 从 Release 事件中获取 tag 名称（GitHub 创建 Release 时会自动创建 tag）
+          VERSION="${{ github.event.release.tag_name }}"
+          # 保留版本号中的 "v" 前缀（如果存在）
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
+          echo "Release: ${{ github.event.release.name }}"
 
       - name: Build
+        shell: bash
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -63,7 +71,11 @@ jobs:
             -o "${OUTPUT_DIR}/${OUTPUT_NAME}" \
             ./cmd/serve
           # 复制 README.md 到输出目录
-          cp README.md "${OUTPUT_DIR}/"
+          if [ -f "README.md" ]; then
+            cp README.md "${OUTPUT_DIR}/"
+          else
+            echo "Warning: README.md not found"
+          fi
 
       - name: Create archive
         shell: bash
@@ -81,10 +93,11 @@ jobs:
       - name: Generate checksum
         shell: bash
         run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            sha256sum "serve_${{ steps.get_version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" >> checksums.txt
+            sha256sum "serve_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" >> checksums.txt
           else
-            sha256sum "serve_${{ steps.get_version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" >> checksums.txt
+            sha256sum "serve_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" >> checksums.txt
           fi
 
       - name: Upload artifacts
@@ -96,22 +109,26 @@ jobs:
             checksums.txt
 
   release:
-    name: Create Release
+    name: Upload Release Assets
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write  # 需要写入权限来上传 Release 文件
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Get version from tag
+      - name: Get version from release
         id: get_version
+        shell: bash
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          VERSION=${VERSION#v}
+          # 从 Release 事件中获取 tag 名称
+          VERSION="${{ github.event.release.tag_name }}"
+          # 保留版本号中的 "v" 前缀（如果存在）
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          echo "tag=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release: ${{ github.event.release.name }}"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -128,26 +145,13 @@ jobs:
           # 合并 checksums
           find artifacts -name "checksums.txt" -exec cat {} \; | sort -u > release/checksums.txt
 
-      - name: Create Release
+      - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
         with:
           files: release/*
-          name: Release ${{ steps.get_version.outputs.tag }}
-          body: |
-            ## Release ${{ steps.get_version.outputs.tag }}
-            
-            ### Downloads
-            
-            **Checksums:**
-            ```
-            $(cat release/checksums.txt)
-            ```
-            
-            ### Supported Platforms
-            
-            - Linux (amd64, arm64)
-            - macOS (amd64, arm64)
-            - Windows (amd64, arm64)
+          tag_name: ${{ github.event.release.tag_name }}
+          # Release 已经存在（由 GitHub Release 创建），只需要上传文件
+          # 明确指定 tag_name 确保上传到正确的 Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

@@ -23,7 +23,8 @@ go.work
 *.bin
 
 # 构建输出目录
-dist/
+.build/
+/dist
 
 # IDE 相关文件
 # VSCode
