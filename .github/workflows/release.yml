@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # 当推送以 v 开头的 tag 时触发
+
+jobs:
+  build:
+    name: Build Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+          - os: windows-latest
+            goos: windows
+            goarch: arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${VERSION#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          OUTPUT_NAME="serve"
+          OUTPUT_DIR="serve_${{ steps.get_version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            OUTPUT_NAME="serve.exe"
+          fi
+          mkdir -p "${OUTPUT_DIR}"
+          go build -ldflags "-X main.version=${{ steps.get_version.outputs.version }}" \
+            -o "${OUTPUT_DIR}/${OUTPUT_NAME}" \
+            ./cmd/serve
+          # 复制 README.md 到输出目录
+          cp README.md "${OUTPUT_DIR}/"
+
+      - name: Create archive
+        shell: bash
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          OUTPUT_DIR="serve_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip -r "serve_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" \
+              "${OUTPUT_DIR}"
+          else
+            tar -czf "serve_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" \
+              "${OUTPUT_DIR}"
+          fi
+
+      - name: Generate checksum
+        shell: bash
+        run: |
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            sha256sum "serve_${{ steps.get_version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" >> checksums.txt
+          else
+            sha256sum "serve_${{ steps.get_version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" >> checksums.txt
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            serve_${{ steps.get_version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.*
+            checksums.txt
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${VERSION#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          mkdir -p release
+          # 合并所有平台的 artifacts
+          find artifacts -name "*.tar.gz" -exec cp {} release/ \;
+          find artifacts -name "*.zip" -exec cp {} release/ \;
+          # 合并 checksums
+          find artifacts -name "checksums.txt" -exec cat {} \; | sort -u > release/checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+          name: Release ${{ steps.get_version.outputs.tag }}
+          body: |
+            ## Release ${{ steps.get_version.outputs.tag }}
+            
+            ### Downloads
+            
+            **Checksums:**
+            ```
+            $(cat release/checksums.txt)
+            ```
+            
+            ### Supported Platforms
+            
+            - Linux (amd64, arm64)
+            - macOS (amd64, arm64)
+            - Windows (amd64, arm64)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

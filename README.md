@@ -76,6 +76,29 @@ go install ./cmd/serve@latest
 
 使用 `go install` 安装后，可执行文件会被安装到 `$GOPATH/bin` 或 `$GOBIN` 目录下（如果已设置），确保该目录在系统的 PATH 环境变量中，即可直接使用 `serve` 命令。
 
+### 方式三：从 Release 下载预编译二进制
+
+访问 [GitHub Releases](https://github.com/your-username/serve/releases) 下载对应平台的预编译二进制文件。
+
+### 本地构建多平台 Release
+
+项目提供了构建脚本来生成所有平台的二进制文件：
+
+```bash
+# 构建所有平台的二进制文件
+./scripts/build-release.sh v1.0.0
+
+# 构建文件将输出到 dist/ 目录
+# 每个压缩包都包含二进制文件和 README.md
+```
+
+构建脚本支持以下平台和架构：
+- Linux (amd64, arm64)
+- macOS (amd64, arm64)
+- Windows (amd64, arm64)
+
+**注意：** 每个平台的压缩包中都包含了 `README.md` 文件，方便用户查看使用说明。
+
 ## 使用方法
 
 ### 基本用法
@@ -132,9 +155,14 @@ serve/
 │   │   └── static.go         # 静态文件服务实现
 │   └── proxy/
 │       └── proxy.go          # 反向代理服务实现
+├── scripts/
+│   └── build-release.sh      # 多平台构建脚本
+├── .github/
+│   └── workflows/
+│       └── release.yml       # GitHub Actions 自动发布工作流
 ├── go.mod                    # Go 模块定义
 ├── go.sum                    # 依赖校验和
-├── brief.md                  # 项目需求文档
+├── .gitignore               # Git 忽略文件配置
 └── README.md                 # 项目说明文档
 ```
 
