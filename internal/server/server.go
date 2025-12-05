@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"time"
 
@@ -61,8 +62,32 @@ func (s *Server) Start() error {
 
 	// 根据配置启动 HTTP 或 HTTPS 服务
 	if s.config.IsHTTPS() {
+		// 配置 TLS 以支持 Android 4 等旧版本浏览器
+		tlsConfig := &tls.Config{
+			MinVersion: tls.VersionTLS10, // 支持 TLS 1.0（Android 4 支持的最低版本）
+			MaxVersion: tls.VersionTLS13, // 支持到 TLS 1.3
+			// 使用兼容 Android 4 的加密套件
+			CipherSuites: []uint16{
+				tls.TLS_RSA_WITH_AES_128_CBC_SHA,
+				tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+				tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+				tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+				tls.TLS_ECDHE_RSA_WITH_RC4_128_SHA,
+				// 现代加密套件（优先）
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			},
+			PreferServerCipherSuites: true,
+		}
+		s.httpServer.TLSConfig = tlsConfig
+		
 		s.logger.Infof("Starting HTTPS server on %s", s.config.Host)
 		s.logger.Infof("Certificate: %s, Key: %s", s.config.CertFile, s.config.KeyFile)
+		s.logger.Infof("TLS configuration: MinVersion=TLS1.0, MaxVersion=TLS1.3 (Android 4 compatible)")
 		return s.httpServer.ListenAndServeTLS(s.config.CertFile, s.config.KeyFile)
 	}
 

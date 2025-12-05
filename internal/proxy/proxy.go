@@ -102,16 +102,39 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 创建反向代理
 	proxy := httputil.NewSingleHostReverseProxy(parsedURL)
 
-	// 配置传输层，处理 SSL 证书验证
-	if proxyConfig.UseHTTPS && proxyConfig.Insecure {
-		// 跳过 SSL 证书验证
-		proxy.Transport = &http.Transport{
+	// 配置传输层，处理 SSL 证书验证和 Android 4 兼容性
+	if proxyConfig.UseHTTPS {
+		transportConfig := &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
+				MinVersion: tls.VersionTLS10, // 支持 TLS 1.0（Android 4 支持的最低版本）
+				MaxVersion: tls.VersionTLS13, // 支持到 TLS 1.3
+				// 使用兼容 Android 4 的加密套件
+				CipherSuites: []uint16{
+					tls.TLS_RSA_WITH_AES_128_CBC_SHA,
+					tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+					tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+					tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+					tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+					tls.TLS_ECDHE_RSA_WITH_RC4_128_SHA,
+					// 现代加密套件（优先）
+					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+					tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+					tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+					tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+					tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				},
+				PreferServerCipherSuites: true,
 			},
 		}
-		h.logger.Debugf("SSL certificate verification disabled for: %s", targetDomain)
-		h.logger.Debugf("Path prefix: %s, Target domain: %s", pathPrefix, targetDomain)
+		
+		if proxyConfig.Insecure {
+			// 跳过 SSL 证书验证
+			transportConfig.TLSClientConfig.InsecureSkipVerify = true
+			h.logger.Debugf("SSL certificate verification disabled for: %s", targetDomain)
+		}
+		
+		proxy.Transport = transportConfig
+		h.logger.Debugf("Path prefix: %s, Target domain: %s (Android 4 compatible TLS)", pathPrefix, targetDomain)
 	}
 
 	// 修改请求，设置正确的 Host 头

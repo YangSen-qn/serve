@@ -10,6 +10,7 @@
 - 支持 HTTP 和 HTTPS 协议
 - 支持配置 SSL 证书路径
 - 支持配置日志等级（debug, info, warn, error）
+- **兼容性支持**：支持 Android 4 等旧版本浏览器（TLS 1.0+，兼容加密套件）
 
 ### 静态文件服务
 
